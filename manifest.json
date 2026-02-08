@@ -1,0 +1,10 @@
+{
+  "id": "kanbanify",
+  "name": "Kanbanify",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Canvas-like kanban view with swimlanes and draggable notes.",
+  "author": "Kanbanify",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

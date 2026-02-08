@@ -1,0 +1,255 @@
+.kanbanify-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.kanbanify-board {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.kanbanify-board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kanbanify-board-title {
+  font-size: 1.2em;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kanbanify-board-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kanbanify-board-action {
+  border: none;
+  background: transparent;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.kanbanify-board-action:hover {
+  background: var(--background-modifier-hover);
+}
+
+.kanbanify-board::after {
+  content: "";
+  display: block;
+}
+
+.kanbanify-lanes {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.kanbanify-lane {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-secondary);
+  border-radius: 10px;
+  border: 1px solid var(--background-modifier-border);
+  min-height: 300px;
+}
+
+.kanbanify-lane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-weight: 600;
+}
+
+.kanbanify-lane-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kanbanify-add {
+  border: none;
+  background: transparent;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.kanbanify-add:hover {
+  background: var(--background-modifier-hover);
+}
+
+.kanbanify-lane-content {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kanbanify-drop-target {
+  background: var(--background-modifier-hover);
+}
+
+.kanbanify-card {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: grab;
+  box-shadow: var(--shadow-s);
+  border-left-width: 4px;
+}
+
+.kanbanify-card:active {
+  cursor: grabbing;
+}
+
+.kanbanify-card-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kanbanify-card-type {
+  margin-top: 6px;
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  font-size: 0.75em;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.kanbanify-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 24px;
+  background: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 12px;
+}
+
+.kanbanify-empty-button {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.kanbanify-empty-button:hover {
+  background: var(--background-modifier-hover);
+}
+
+.kanbanify-input {
+  width: 100%;
+  padding: 8px;
+  margin-top: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.kanbanify-select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.kanbanify-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.kanbanify-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px;
+  margin-top: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  resize: vertical;
+}
+
+.kanbanify-types {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.kanbanify-type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kanbanify-type-name {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.kanbanify-type-color {
+  width: 42px;
+  height: 32px;
+  border: none;
+  background: transparent;
+}
+
+.kanbanify-type-remove {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.kanbanify-type-add {
+  margin-top: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
