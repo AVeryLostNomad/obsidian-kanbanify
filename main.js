@@ -19,6 +19,9 @@ const LANES_FIELD = "kanbanLanes";
 const FOLDER_FIELD = "kanbanFolder";
 const DEFAULT_LANE_FIELD = "kanbanDefaultLane";
 const CARD_TYPES_FIELD = "kanbanTypes";
+const DONE_LANE_FIELD = "kanbanDoneLane";
+const HIDE_DONE_AFTER_FIELD = "kanbanHideDoneAfter";
+const MOVED_AT_FIELD = "kanbanMovedAt";
 
 const DEFAULT_SETTINGS = {
   notesFolder: "Kanban",
@@ -31,6 +34,15 @@ const DEFAULT_SETTINGS = {
   ],
   lastSelectedType: ""
 };
+
+const HIDE_DONE_OPTIONS = [
+  "Never",
+  "Immediately",
+  "10 minutes",
+  "One Day",
+  "One Week",
+  "Two Weeks"
+];
 
 function renderCardTypeEditor(containerEl, plugin) {
   const typesContainer = containerEl.createDiv("kanbanify-types");
@@ -347,6 +359,9 @@ class KanbanView extends ItemView {
             typeEl.style.color = note.typeColor;
           }
         }
+        if (note.isDone) {
+          cardEl.addClass("kanbanify-card-done");
+        }
         cardEl.addEventListener("click", () => {
           this.plugin.openFile(note.file);
         });
@@ -547,6 +562,7 @@ class BoardSettingsModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.addClass("kanbanify-board-settings");
 
     const boardConfig = this.plugin.getBoardConfig(this.boardFile);
     if (!boardConfig) {
@@ -593,6 +609,35 @@ class BoardSettingsModal extends Modal {
     refreshDefaultOptions();
     lanesInput.addEventListener("input", refreshDefaultOptions);
 
+    const doneLabel = contentEl.createEl("label", { text: "Done column" });
+    const doneSelect = contentEl.createEl("select", {
+      cls: "kanbanify-select"
+    });
+    doneLabel.appendChild(doneSelect);
+
+    const hideLabel = contentEl.createEl("label", { text: "Hide in Done After" });
+    const hideSelect = contentEl.createEl("select", {
+      cls: "kanbanify-select"
+    });
+    hideLabel.appendChild(hideSelect);
+    HIDE_DONE_OPTIONS.forEach((option) => {
+      hideSelect.createEl("option", { text: option, value: option });
+    });
+    hideSelect.value = boardConfig.hideDoneAfter || "Never";
+
+    const refreshDoneOptions = () => {
+      doneSelect.empty();
+      const lanes = this.plugin.parseLanes(lanesInput.value) || [];
+      lanes.forEach((lane) => doneSelect.createEl("option", { text: lane, value: lane }));
+      doneSelect.createEl("option", { text: "None", value: "" });
+      const defaultDone = lanes.includes("Done") ? "Done" : "";
+      doneSelect.value = lanes.includes(boardConfig.doneLane)
+        ? boardConfig.doneLane
+        : defaultDone;
+    };
+    refreshDoneOptions();
+    lanesInput.addEventListener("input", refreshDoneOptions);
+
     contentEl.createEl("h4", { text: "Card types" });
     renderCardTypeEditorForBoard(contentEl, types, (updated) => {
       types = updated;
@@ -618,7 +663,9 @@ class BoardSettingsModal extends Modal {
         lanes,
         notesFolder,
         defaultLane,
-        cardTypes: types
+        cardTypes: types,
+        doneLane: doneSelect.value || "",
+        hideDoneAfter: hideSelect.value || "Never"
       });
       this.plugin.refreshViews();
       this.close();
@@ -1107,6 +1154,12 @@ module.exports = class KanbanifyPlugin extends Plugin {
       ? frontmatter[DEFAULT_LANE_FIELD]
       : this.settings.defaultLane;
     const cardTypes = this.parseCardTypes(frontmatter[CARD_TYPES_FIELD]) || this.getCardTypes();
+    const doneLane = typeof frontmatter[DONE_LANE_FIELD] === "string"
+      ? frontmatter[DONE_LANE_FIELD]
+      : "";
+    const hideDoneAfter = typeof frontmatter[HIDE_DONE_AFTER_FIELD] === "string"
+      ? frontmatter[HIDE_DONE_AFTER_FIELD]
+      : "Never";
 
     const finalLanes = lanes.length > 0 ? lanes : DEFAULT_SETTINGS.lanes.slice();
     const finalDefaultLane = finalLanes.includes(defaultLane) ? defaultLane : finalLanes[0];
@@ -1118,7 +1171,11 @@ module.exports = class KanbanifyPlugin extends Plugin {
       notesFolder,
       notesFolderInput,
       defaultLane: finalDefaultLane,
-      cardTypes
+      cardTypes,
+      doneLane: finalLanes.includes(doneLane)
+        ? doneLane
+        : (finalLanes.includes("Done") ? "Done" : ""),
+      hideDoneAfter
     };
   }
 
@@ -1191,6 +1248,17 @@ module.exports = class KanbanifyPlugin extends Plugin {
     return typeof status === "string" ? status : null;
   }
 
+  getMovedAt(file) {
+    const cache = this.app.metadataCache.getFileCache(file);
+    const movedAt = cache?.frontmatter?.[MOVED_AT_FIELD];
+    if (typeof movedAt === "number") return movedAt;
+    if (typeof movedAt === "string") {
+      const parsed = Date.parse(movedAt);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    return null;
+  }
+
   getType(file) {
     const cache = this.app.metadataCache.getFileCache(file);
     const type = cache?.frontmatter?.[TYPE_FIELD];
@@ -1211,18 +1279,23 @@ module.exports = class KanbanifyPlugin extends Plugin {
       if (!this.isFileInFolder(file, boardConfig.notesFolder)) return;
 
       const status = this.getStatus(file);
+      const movedAt = this.getMovedAt(file);
       const type = this.getType(file);
       const mappedType = type ? typeMap.get(type.toLowerCase()) : null;
       const typeLabel = mappedType?.name || (type ? type : "");
       const typeColor = mappedType?.color || "";
       const targetLane = lanes.includes(status) ? status : defaultLane;
+      if (this.shouldHideDone(boardConfig, targetLane, movedAt)) {
+        return;
+      }
       if (!notesByLane.has(targetLane)) {
         notesByLane.set(targetLane, []);
       }
       notesByLane.get(targetLane).push({
         file,
         typeLabel,
-        typeColor
+        typeColor,
+        isDone: boardConfig.doneLane && targetLane === boardConfig.doneLane
       });
     });
 
@@ -1491,6 +1564,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
     }
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       frontmatter[STATUS_FIELD] = lane;
+      frontmatter[MOVED_AT_FIELD] = Date.now();
     });
   }
 
@@ -1505,6 +1579,25 @@ module.exports = class KanbanifyPlugin extends Plugin {
         frontmatter[TYPE_FIELD] = type;
       }
     });
+  }
+
+  shouldHideDone(boardConfig, lane, movedAt) {
+    if (!boardConfig.doneLane) return false;
+    if (lane !== boardConfig.doneLane) return false;
+    const rule = boardConfig.hideDoneAfter || "Never";
+    if (rule === "Never") return false;
+    if (rule === "Immediately") return true;
+    if (!movedAt) return false;
+    const ageMs = Date.now() - movedAt;
+    const thresholds = {
+      "10 minutes": 10 * 60 * 1000,
+      "One Day": 24 * 60 * 60 * 1000,
+      "One Week": 7 * 24 * 60 * 60 * 1000,
+      "Two Weeks": 14 * 24 * 60 * 60 * 1000
+    };
+    const threshold = thresholds[rule];
+    if (!threshold) return false;
+    return ageMs > threshold;
   }
 
   async createNoteInLane(lane, boardConfig) {
@@ -1945,6 +2038,10 @@ module.exports = class KanbanifyPlugin extends Plugin {
         color: typeof type.color === "string" ? type.color : "#0ea5e9"
       })).filter((type) => type.name.length > 0)
       : [];
+    const doneLane = typeof updates.doneLane === "string" ? updates.doneLane : "";
+    const hideDoneAfter = typeof updates.hideDoneAfter === "string"
+      ? updates.hideDoneAfter
+      : "Never";
 
     await this.app.fileManager.processFrontMatter(boardFile, (frontmatter) => {
       frontmatter[BOARD_FIELD] = true;
@@ -1952,6 +2049,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
       frontmatter[FOLDER_FIELD] = notesFolder;
       frontmatter[DEFAULT_LANE_FIELD] = defaultLane;
       frontmatter[CARD_TYPES_FIELD] = cardTypes;
+      frontmatter[DONE_LANE_FIELD] = doneLane;
+      frontmatter[HIDE_DONE_AFTER_FIELD] = hideDoneAfter;
     });
   }
 
@@ -2015,6 +2114,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
       ? this.settings.defaultLane
       : lanes[0];
 
+    const defaultDoneLane = lanes.includes("Done") ? "Done" : (lanes[lanes.length - 1] || defaultLane);
     const frontmatterLines = [
       "---",
       "kanbanBoard: true",
@@ -2022,6 +2122,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
       "kanbanLanes:",
       ...lanes.map((lane) => `  - "${lane}"`),
       `kanbanDefaultLane: "${defaultLane}"`,
+      `kanbanDoneLane: "${defaultDoneLane}"`,
+      "kanbanHideDoneAfter: \"Never\"",
       "kanbanTypes:",
       ...this.getCardTypes().map((type) => `  - name: "${type.name}"\n    color: "${type.color}"`),
       "---",
