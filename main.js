@@ -270,11 +270,12 @@ class KanbanView extends ItemView {
     const lanesEl = this.boardEl.createDiv("kanbanify-lanes");
 
     lanes.forEach((lane) => {
+      const notes = notesByLane.get(lane) || [];
       const laneEl = lanesEl.createDiv("kanbanify-lane");
       const headerEl = laneEl.createDiv("kanbanify-lane-header");
       headerEl.createDiv({
         cls: "kanbanify-lane-title",
-        text: lane
+        text: `${lane} (${notes.length})`
       });
       const laneActions = headerEl.createDiv("kanbanify-lane-actions");
       const addButton = laneActions.createEl("button", {
@@ -317,7 +318,6 @@ class KanbanView extends ItemView {
         this.plugin.handleDrop(event, lane, boardConfig);
       });
 
-      const notes = notesByLane.get(lane) || [];
       notes.forEach((note) => {
         const cardEl = contentEl.createDiv("kanbanify-card");
         cardEl.setAttr("draggable", "true");
@@ -351,12 +351,29 @@ class KanbanView extends ItemView {
           event.stopPropagation();
           this.plugin.deleteNote(note.file);
         });
-        if (note.typeLabel) {
-          const typeEl = cardEl.createDiv("kanbanify-card-type");
-          typeEl.setText(note.typeLabel);
-          if (note.typeColor) {
-            typeEl.style.borderColor = note.typeColor;
-            typeEl.style.color = note.typeColor;
+        if (note.preview) {
+          const previewEl = cardEl.createDiv("kanbanify-card-preview");
+          previewEl.setText(note.preview);
+        }
+        if (note.typeLabel || note.movedAtLabel) {
+          const footerEl = cardEl.createDiv("kanbanify-card-footer");
+          if (note.typeLabel) {
+            const typeEl = footerEl.createDiv("kanbanify-card-type");
+            typeEl.setText(note.typeLabel);
+            if (note.typeColor) {
+              typeEl.style.borderColor = note.typeColor;
+              typeEl.style.color = note.typeColor;
+            }
+          }
+          if (note.movedAtLabel) {
+            const updatedEl = footerEl.createDiv("kanbanify-card-updated");
+            updatedEl.createSpan({
+              cls: "kanbanify-card-updated-date",
+              text: note.movedAtLabel
+            });
+            if (note.movedAtTitle) {
+              updatedEl.setAttr("title", note.movedAtTitle);
+            }
           }
         }
         if (note.isDone) {
@@ -1256,7 +1273,86 @@ module.exports = class KanbanifyPlugin extends Plugin {
       const parsed = Date.parse(movedAt);
       if (!Number.isNaN(parsed)) return parsed;
     }
-    return null;
+    const fallback = file?.stat?.mtime;
+    return typeof fallback === "number" ? fallback : null;
+  }
+
+  formatTimestamp(timestamp) {
+    const date = new Date(timestamp);
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    }).format(date);
+  }
+
+  formatMovedAtLabel(timestamp) {
+    const now = Date.now();
+    const diffMs = Math.max(0, now - timestamp);
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    const week = 7 * day;
+    if (diffMs < minute) {
+      return "just now";
+    }
+    if (diffMs < hour) {
+      const minutes = Math.floor(diffMs / minute);
+      const label = minutes === 1 ? "minute" : "minutes";
+      return `${minutes} ${label} ago`;
+    }
+    if (diffMs < day) {
+      const hours = Math.floor(diffMs / hour);
+      const label = hours === 1 ? "hour" : "hours";
+      return `${hours} ${label} ago`;
+    }
+    if (diffMs < week) {
+      const days = Math.floor(diffMs / day);
+      const label = days === 1 ? "day" : "days";
+      return `${days} ${label} ago`;
+    }
+    return this.formatTimestamp(timestamp);
+  }
+
+  async buildPreviewMap(files, boardConfig) {
+    const map = new Map();
+    const boardPath = boardConfig.boardFile?.path;
+    const entries = files.filter((file) => this.isFileInFolder(file, boardConfig.notesFolder));
+    const limit = 120;
+    for (const file of entries) {
+      if (boardPath && file.path === boardPath) continue;
+      try {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const firstHeading = cache?.headings?.[0]?.heading;
+        const body = await this.app.vault.cachedRead(file);
+        let text = body;
+        if (text.startsWith("---")) {
+          const endIndex = text.indexOf("\n---", 3);
+          if (endIndex !== -1) {
+            text = text.slice(endIndex + 4);
+          }
+        }
+        text = text.replace(/```\s*[\s\S]*?```/g, "");
+        text = text.replace(/^\s*#+\s.*$/gm, "");
+        text = text.replace(/\[\[([^\]]+)\]\]/g, "$1");
+        text = text.replace(/!\[.*?\]\(.*?\)/g, "");
+        text = text.replace(/\[(.*?)\]\(.*?\)/g, "$1");
+        text = text.replace(/`([^`]+)`/g, "$1");
+        text = text.replace(/\s+/g, " ").trim();
+        if (firstHeading) {
+          text = text.replace(firstHeading, "").trim();
+        }
+        if (text.length > limit) {
+          text = text.slice(0, limit).trimEnd() + "...";
+        }
+        map.set(file.path, text);
+      } catch {
+        map.set(file.path, "");
+      }
+    }
+    return map;
   }
 
   getType(file) {
@@ -1275,6 +1371,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
     );
 
     const files = this.app.vault.getMarkdownFiles();
+    const previewMap = await this.buildPreviewMap(files, boardConfig);
     files.forEach((file) => {
       if (!this.isFileInFolder(file, boardConfig.notesFolder)) return;
 
@@ -1288,6 +1385,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
       if (this.shouldHideDone(boardConfig, targetLane, movedAt)) {
         return;
       }
+      const movedAtLabel = movedAt ? this.formatMovedAtLabel(movedAt) : "";
+      const movedAtTitle = movedAt ? this.formatTimestamp(movedAt) : "";
       if (!notesByLane.has(targetLane)) {
         notesByLane.set(targetLane, []);
       }
@@ -1295,7 +1394,11 @@ module.exports = class KanbanifyPlugin extends Plugin {
         file,
         typeLabel,
         typeColor,
-        isDone: boardConfig.doneLane && targetLane === boardConfig.doneLane
+        isDone: boardConfig.doneLane && targetLane === boardConfig.doneLane,
+        preview: previewMap.get(file.path) || "",
+        laneLabel: targetLane,
+        movedAtLabel,
+        movedAtTitle
       });
     });
 
