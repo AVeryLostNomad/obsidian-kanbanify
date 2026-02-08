@@ -790,6 +790,9 @@ module.exports = class KanbanifyPlugin extends Plugin {
     this.lastActiveLeaf = null;
     this.suppressedBoardFiles = new Map();
     this.inlinePopover = null;
+    this.debugDrops = false;
+    this.lastDragPath = null;
+    this.lastDragAt = 0;
 
     this.registerView(
       VIEW_TYPE,
@@ -816,6 +819,30 @@ module.exports = class KanbanifyPlugin extends Plugin {
       id: "create-kanbanify-board",
       name: "Create Kanban board note",
       callback: () => this.createBoard()
+    });
+
+    this.addCommand({
+      id: "toggle-kanbanify-drop-debug",
+      name: "Toggle Kanbanify drop debug logging",
+      callback: () => {
+        this.debugDrops = !this.debugDrops;
+        new Notice(`Kanbanify drop debug ${this.debugDrops ? "enabled" : "disabled"}.`);
+      }
+    });
+
+    this.registerDomEvent(document, "dragstart", (event) => {
+      const target = event.target;
+      const el = target?.closest?.("[data-path]");
+      const path = el?.getAttribute?.("data-path");
+      if (path) {
+        this.lastDragPath = path;
+        this.lastDragAt = Date.now();
+      }
+    });
+
+    this.registerDomEvent(document, "dragend", () => {
+      this.lastDragPath = null;
+      this.lastDragAt = 0;
     });
 
     this.addSettingTab(new KanbanifySettingTab(this.app, this));
@@ -1209,6 +1236,9 @@ module.exports = class KanbanifyPlugin extends Plugin {
   async handleDrop(event, lane, boardConfig) {
     let file = await this.resolveDroppedFile(event);
     if (!file) {
+      if (this.debugDrops) {
+        this.logDropDebug(event, lane);
+      }
       new Notice("No note detected in drop.");
       return;
     }
@@ -1229,7 +1259,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
     const dataTransfer = event.dataTransfer;
     if (!dataTransfer) return null;
 
-    const tryResolveFromData = (data) => {
+    const tryResolveFromData = (data, label) => {
       if (!data) return null;
       const text = data.trim();
       if (!text) return null;
@@ -1300,7 +1330,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
     if (dataTransfer.types && dataTransfer.types.length > 0) {
       for (const type of Array.from(dataTransfer.types)) {
         const data = dataTransfer.getData(type);
-        const resolved = tryResolveFromData(data);
+        const resolved = tryResolveFromData(data, type);
         if (resolved) return resolved;
       }
     }
@@ -1322,7 +1352,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
 
     if (!directPath) return null;
 
-    const resolved = tryResolveFromData(directPath);
+    const resolved = tryResolveFromData(directPath, "directPath");
     if (resolved) return resolved;
 
     if (dataTransfer.items && dataTransfer.items.length > 0) {
@@ -1335,13 +1365,43 @@ module.exports = class KanbanifyPlugin extends Plugin {
         }
         if (item.kind === "string" && item.getAsString) {
           const data = await new Promise((resolve) => item.getAsString(resolve));
-          const fromItem = tryResolveFromData(data);
+          const fromItem = tryResolveFromData(data, "item-string");
           if (fromItem) return fromItem;
         }
       }
     }
 
+    if (this.lastDragPath && Date.now() - this.lastDragAt < 10000) {
+      const fallback = this.getFileFromPath(this.lastDragPath);
+      if (fallback) return fallback;
+    }
+
     return null;
+  }
+
+  logDropDebug(event, lane) {
+    try {
+      const dataTransfer = event.dataTransfer;
+      const types = dataTransfer?.types ? Array.from(dataTransfer.types) : [];
+      console.log("[kanbanify] drop debug", {
+        lane,
+        types,
+        files: dataTransfer?.files?.length || 0,
+        items: dataTransfer?.items?.length || 0,
+        dropEffect: dataTransfer?.dropEffect,
+        effectAllowed: dataTransfer?.effectAllowed
+      });
+      types.forEach((type) => {
+        try {
+          const value = dataTransfer.getData(type);
+          console.log(`[kanbanify] type ${type}`, value);
+        } catch (error) {
+          console.log(`[kanbanify] type ${type} error`, error);
+        }
+      });
+    } catch (error) {
+      console.log("[kanbanify] drop debug error", error);
+    }
   }
 
   getFileFromDragText(text) {
