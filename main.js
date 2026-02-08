@@ -143,6 +143,12 @@ function renderCardTypeEditorForBoard(containerEl, types, onChange) {
   });
 }
 
+function joinPath(base, child) {
+  if (!base) return child || "";
+  if (!child) return base;
+  return `${base.replace(/\/$/, "")}/${child.replace(/^\//, "")}`;
+}
+
 class KanbanView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
@@ -205,6 +211,9 @@ class KanbanView extends ItemView {
 
   async refresh() {
     if (!this.boardEl) return;
+    if (this.plugin.closeInlinePopover) {
+      this.plugin.closeInlinePopover();
+    }
 
     const boardFile = this.getBoardFile();
     if (!boardFile) {
@@ -255,7 +264,8 @@ class KanbanView extends ItemView {
         cls: "kanbanify-lane-title",
         text: lane
       });
-      const addButton = headerEl.createEl("button", {
+      const laneActions = headerEl.createDiv("kanbanify-lane-actions");
+      const addButton = laneActions.createEl("button", {
         cls: "kanbanify-add",
         attr: { "aria-label": `Add note to ${lane}`, type: "button" }
       });
@@ -263,7 +273,17 @@ class KanbanView extends ItemView {
       addButton.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        await this.plugin.createNoteInLane(lane, boardConfig);
+        this.plugin.openInlineCreateMenu(addButton, lane, boardConfig);
+      });
+      const laneSettingsButton = laneActions.createEl("button", {
+        cls: "kanbanify-lane-settings",
+        attr: { "aria-label": `Rename ${lane}`, type: "button" }
+      });
+      setIcon(laneSettingsButton, "settings");
+      laneSettingsButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.plugin.openInlineLaneRenameMenu(laneSettingsButton, boardConfig.boardFile, lane);
       });
 
       const contentEl = laneEl.createDiv("kanbanify-lane-content");
@@ -293,9 +313,31 @@ class KanbanView extends ItemView {
         if (note.typeColor) {
           cardEl.style.borderLeft = `4px solid ${note.typeColor}`;
         }
-        cardEl.createDiv({
+        const cardHeader = cardEl.createDiv("kanbanify-card-header");
+        cardHeader.createDiv({
           cls: "kanbanify-card-title",
           text: note.file.basename
+        });
+        const cardActions = cardHeader.createDiv("kanbanify-card-actions");
+        const cardSettingsButton = cardActions.createEl("button", {
+          cls: "kanbanify-card-settings",
+          attr: { "aria-label": "Edit card type", type: "button" }
+        });
+        setIcon(cardSettingsButton, "settings");
+        cardSettingsButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.plugin.openInlineCardTypeMenu(cardSettingsButton, note.file, boardConfig);
+        });
+        const cardDeleteButton = cardActions.createEl("button", {
+          cls: "kanbanify-card-delete",
+          attr: { "aria-label": "Delete note", type: "button" }
+        });
+        setIcon(cardDeleteButton, "trash-2");
+        cardDeleteButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.plugin.deleteNote(note.file);
         });
         if (note.typeLabel) {
           const typeEl = cardEl.createDiv("kanbanify-card-type");
@@ -452,6 +494,48 @@ class TypePromptModal extends Modal {
   }
 }
 
+class CardTypeModal extends Modal {
+  constructor(app, plugin, file, boardConfig) {
+    super(app);
+    this.plugin = plugin;
+    this.file = file;
+    this.boardConfig = boardConfig;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "Card type" });
+
+    const selectEl = contentEl.createEl("select", {
+      cls: "kanbanify-select"
+    });
+    selectEl.createEl("option", { text: "No type", value: "" });
+    this.boardConfig.cardTypes.forEach((type) => {
+      selectEl.createEl("option", { text: type.name, value: type.name });
+    });
+    const currentType = this.plugin.getType(this.file);
+    if (currentType) {
+      selectEl.value = currentType;
+    }
+
+    const actionsEl = contentEl.createDiv("kanbanify-prompt-actions");
+    const cancelButton = actionsEl.createEl("button", { text: "Cancel" });
+    const okButton = actionsEl.createEl("button", { text: "Save" });
+
+    cancelButton.addEventListener("click", () => this.close());
+    okButton.addEventListener("click", async () => {
+      await this.plugin.setType(this.file, selectEl.value.trim());
+      this.plugin.refreshViews();
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class BoardSettingsModal extends Modal {
   constructor(app, plugin, boardFile) {
     super(app);
@@ -478,7 +562,7 @@ class BoardSettingsModal extends Modal {
       type: "text",
       cls: "kanbanify-input"
     });
-    folderInput.value = boardConfig.notesFolder;
+    folderInput.value = boardConfig.notesFolderInput || boardConfig.notesFolder;
     folderLabel.appendChild(folderInput);
 
     const lanesLabel = contentEl.createEl("label", { text: "Swimlanes" });
@@ -538,6 +622,93 @@ class BoardSettingsModal extends Modal {
       });
       this.plugin.refreshViews();
       this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class CardTypeSelectModal extends Modal {
+  constructor(app, typeOptions, currentType) {
+    super(app);
+    this.typeOptions = typeOptions || [];
+    this.currentType = currentType || "";
+    this.resolve = null;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "Card type" });
+
+    const selectEl = contentEl.createEl("select", {
+      cls: "kanbanify-select"
+    });
+    selectEl.createEl("option", { text: "No type", value: "" });
+    this.typeOptions.forEach((type) => {
+      selectEl.createEl("option", { text: type.name, value: type.name });
+    });
+    if (this.currentType) {
+      selectEl.value = this.currentType;
+    }
+
+    const actionsEl = contentEl.createDiv("kanbanify-prompt-actions");
+    const cancelButton = actionsEl.createEl("button", { text: "Cancel" });
+    const okButton = actionsEl.createEl("button", { text: "Save" });
+
+    cancelButton.addEventListener("click", () => {
+      this.close();
+      if (this.resolve) this.resolve(null);
+    });
+
+    okButton.addEventListener("click", () => {
+      const value = selectEl.value.trim();
+      this.close();
+      if (this.resolve) this.resolve(value);
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class LaneRenameModal extends Modal {
+  constructor(app, laneName) {
+    super(app);
+    this.laneName = laneName;
+    this.resolve = null;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "Rename lane" });
+
+    const inputEl = contentEl.createEl("input", {
+      type: "text",
+      cls: "kanbanify-input",
+      attr: { placeholder: "Lane name" }
+    });
+    inputEl.value = this.laneName;
+    inputEl.focus();
+    inputEl.select();
+
+    const actionsEl = contentEl.createDiv("kanbanify-prompt-actions");
+    const cancelButton = actionsEl.createEl("button", { text: "Cancel" });
+    const okButton = actionsEl.createEl("button", { text: "Save" });
+
+    cancelButton.addEventListener("click", () => {
+      this.close();
+      if (this.resolve) this.resolve(null);
+    });
+
+    okButton.addEventListener("click", () => {
+      const value = inputEl.value.trim();
+      this.close();
+      if (this.resolve) this.resolve(value.length > 0 ? value : null);
     });
   }
 
@@ -618,6 +789,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
     await this.loadSettings();
     this.lastActiveLeaf = null;
     this.suppressedBoardFiles = new Map();
+    this.inlinePopover = null;
 
     this.registerView(
       VIEW_TYPE,
@@ -900,11 +1072,10 @@ module.exports = class KanbanifyPlugin extends Plugin {
     const frontmatter = cache?.frontmatter ?? {};
 
     const lanes = this.parseLanes(frontmatter[LANES_FIELD]) || this.getLaneList();
-    const notesFolder = this.normalizeFolder(
-      typeof frontmatter[FOLDER_FIELD] === "string"
-        ? frontmatter[FOLDER_FIELD]
-        : this.settings.notesFolder
-    );
+    const notesFolderInput = typeof frontmatter[FOLDER_FIELD] === "string"
+      ? frontmatter[FOLDER_FIELD]
+      : this.settings.notesFolder;
+    const notesFolder = this.resolveNotesFolder(boardFile, notesFolderInput);
     const defaultLane = typeof frontmatter[DEFAULT_LANE_FIELD] === "string"
       ? frontmatter[DEFAULT_LANE_FIELD]
       : this.settings.defaultLane;
@@ -918,6 +1089,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
       boardFile,
       lanes: finalLanes,
       notesFolder,
+      notesFolderInput,
       defaultLane: finalDefaultLane,
       cardTypes
     };
@@ -964,6 +1136,20 @@ module.exports = class KanbanifyPlugin extends Plugin {
   normalizeFolder(folder) {
     if (!folder) return "";
     return folder.replace(/[\\/]+$/, "");
+  }
+
+  resolveNotesFolder(boardFile, folder) {
+    const normalized = this.normalizeFolder(folder);
+    if (!normalized) return "";
+    if (normalized.startsWith("/")) {
+      return normalized.replace(/^\/+/, "");
+    }
+    if (normalized.startsWith("./")) {
+      const boardDir = boardFile?.parent?.path || "";
+      return this.normalizeFolder(joinPath(boardDir, normalized.replace(/^\.\//, "")));
+    }
+    const boardDir = boardFile?.parent?.path || "";
+    return this.normalizeFolder(joinPath(boardDir, normalized));
   }
 
   isFileInFolder(file, folder) {
@@ -1021,7 +1207,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
   }
 
   async handleDrop(event, lane, boardConfig) {
-    let file = this.resolveDroppedFile(event);
+    let file = await this.resolveDroppedFile(event);
     if (!file) {
       new Notice("No note detected in drop.");
       return;
@@ -1039,15 +1225,48 @@ module.exports = class KanbanifyPlugin extends Plugin {
     this.refreshViews();
   }
 
-  resolveDroppedFile(event) {
+  async resolveDroppedFile(event) {
     const dataTransfer = event.dataTransfer;
     if (!dataTransfer) return null;
 
-    const directPath =
-      dataTransfer.getData("application/kanbanify-path") ||
-      dataTransfer.getData("application/obsidian-path") ||
-      dataTransfer.getData("text/plain") ||
-      dataTransfer.getData("text/uri-list");
+    const tryResolveFromData = (data) => {
+      if (!data) return null;
+      const text = data.trim();
+      if (!text) return null;
+
+      if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed?.path) {
+            const file = this.getFileFromPath(parsed.path);
+            if (file) return file;
+          }
+          if (Array.isArray(parsed?.paths) && parsed.paths.length > 0) {
+            const file = this.getFileFromPath(parsed.paths[0]);
+            if (file) return file;
+          }
+          if (Array.isArray(parsed?.files) && parsed.files.length > 0) {
+            const entry = parsed.files[0];
+            const path = typeof entry === "string" ? entry : entry?.path;
+            if (path) {
+              const file = this.getFileFromPath(path);
+              if (file) return file;
+            }
+          }
+          if (parsed?.file) {
+            const file = this.getFileFromPath(parsed.file);
+            if (file) return file;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const firstLine = text.split(/\r?\n/)[0].trim();
+      const fromText = this.getFileFromDragText(firstLine);
+      if (fromText) return fromText;
+      return this.getFileFromPath(firstLine);
+    };
 
     const obsidianData = dataTransfer.getData("application/x-obsidian");
     if (obsidianData) {
@@ -1057,10 +1276,43 @@ module.exports = class KanbanifyPlugin extends Plugin {
           const file = this.getFileFromPath(parsed.path);
           if (file) return file;
         }
+        if (Array.isArray(parsed?.paths) && parsed.paths.length > 0) {
+          const file = this.getFileFromPath(parsed.paths[0]);
+          if (file) return file;
+        }
+        if (Array.isArray(parsed?.files) && parsed.files.length > 0) {
+          const entry = parsed.files[0];
+          const path = typeof entry === "string" ? entry : entry?.path;
+          if (path) {
+            const file = this.getFileFromPath(path);
+            if (file) return file;
+          }
+        }
+        if (parsed?.file) {
+          const file = this.getFileFromPath(parsed.file);
+          if (file) return file;
+        }
       } catch {
         // ignore
       }
     }
+
+    if (dataTransfer.types && dataTransfer.types.length > 0) {
+      for (const type of Array.from(dataTransfer.types)) {
+        const data = dataTransfer.getData(type);
+        const resolved = tryResolveFromData(data);
+        if (resolved) return resolved;
+      }
+    }
+
+    const directPath =
+      dataTransfer.getData("application/kanbanify-path") ||
+      dataTransfer.getData("application/obsidian-path") ||
+      dataTransfer.getData("application/obsidian-file") ||
+      dataTransfer.getData("text/x-obsidian-path") ||
+      dataTransfer.getData("text/x-obsidian-file") ||
+      dataTransfer.getData("text/plain") ||
+      dataTransfer.getData("text/uri-list");
 
     if (dataTransfer.files && dataTransfer.files.length > 0) {
       const path = dataTransfer.files[0].path;
@@ -1070,11 +1322,26 @@ module.exports = class KanbanifyPlugin extends Plugin {
 
     if (!directPath) return null;
 
-    const text = directPath.trim();
-    const fileFromText = this.getFileFromDragText(text);
-    if (fileFromText) return fileFromText;
+    const resolved = tryResolveFromData(directPath);
+    if (resolved) return resolved;
 
-    return this.getFileFromPath(text);
+    if (dataTransfer.items && dataTransfer.items.length > 0) {
+      for (const item of Array.from(dataTransfer.items)) {
+        if (item.kind === "file") {
+          const fileItem = item.getAsFile?.();
+          const filePath = fileItem?.path;
+          const file = this.getFileFromPath(filePath);
+          if (file) return file;
+        }
+        if (item.kind === "string" && item.getAsString) {
+          const data = await new Promise((resolve) => item.getAsString(resolve));
+          const fromItem = tryResolveFromData(data);
+          if (fromItem) return fromItem;
+        }
+      }
+    }
+
+    return null;
   }
 
   getFileFromDragText(text) {
@@ -1109,6 +1376,15 @@ module.exports = class KanbanifyPlugin extends Plugin {
 
     const linkTarget = this.app.metadataCache.getFirstLinkpathDest(link, "");
     if (linkTarget instanceof TFile) return linkTarget;
+
+    if (link.endsWith(".md")) {
+      const withoutExt = link.replace(/\.md$/i, "");
+      const byName = this.app.metadataCache.getFirstLinkpathDest(withoutExt, "");
+      if (byName instanceof TFile) return byName;
+    }
+
+    const byName = this.app.metadataCache.getFirstLinkpathDest(link, "");
+    if (byName instanceof TFile) return byName;
 
     return null;
   }
@@ -1163,7 +1439,11 @@ module.exports = class KanbanifyPlugin extends Plugin {
       return;
     }
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      frontmatter[TYPE_FIELD] = type;
+      if (!type) {
+        delete frontmatter[TYPE_FIELD];
+      } else {
+        frontmatter[TYPE_FIELD] = type;
+      }
     });
   }
 
@@ -1173,29 +1453,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
       return;
     }
     const folder = boardConfig.notesFolder || this.settings.notesFolder || "Kanban";
-    const typeOptions = boardConfig.cardTypes || this.getCardTypes();
-    const result = await this.promptForNoteType(typeOptions);
-    if (!result || !result.title) return;
-    const name = result.title;
-    const type = result.type;
-    this.settings.lastSelectedType = type || "";
-    await this.saveSettings();
-
-    const sanitized = name.replace(/[\\/:*?"<>|]/g, "").trim();
-    if (!sanitized) {
-      new Notice("Invalid note title.");
-      return;
-    }
-
-    await this.ensureFolder(folder);
-    const path = await this.getUniqueFilepath(`${folder}/${sanitized}.md`);
-    const file = await this.app.vault.create(path, `# ${sanitized}\n`);
-    await this.setStatus(file, lane);
-    if (type) {
-      await this.setType(file, type);
-    }
-    await this.openFile(file);
-    this.refreshViews();
+    new Notice(`Add notes from the + button on the lane.`);
   }
 
   async moveFileToFolder(file, folder) {
@@ -1235,6 +1493,341 @@ module.exports = class KanbanifyPlugin extends Plugin {
     await leaf.openFile(file);
   }
 
+  openInlineCreateMenu(anchorEl, lane, boardConfig) {
+    if (!anchorEl || !boardConfig) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 240;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "New note";
+    menu.appendChild(title);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Note title";
+    input.className = "kanbanify-input";
+    menu.appendChild(input);
+
+    const typeLabel = document.createElement("div");
+    typeLabel.className = "kanbanify-inline-label";
+    typeLabel.textContent = "Note type";
+    menu.appendChild(typeLabel);
+
+    const select = document.createElement("select");
+    select.className = "kanbanify-select";
+    const noneOption = document.createElement("option");
+    noneOption.value = "";
+    noneOption.textContent = "No type";
+    select.appendChild(noneOption);
+    (boardConfig.cardTypes || []).forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type.name;
+      option.textContent = type.name;
+      select.appendChild(option);
+    });
+    if (this.settings.lastSelectedType) {
+      select.value = this.settings.lastSelectedType;
+    }
+    menu.appendChild(select);
+
+    const actions = document.createElement("div");
+    actions.className = "kanbanify-inline-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.textContent = "Cancel";
+    const createButton = document.createElement("button");
+    createButton.textContent = "Create";
+    actions.appendChild(cancelButton);
+    actions.appendChild(createButton);
+    menu.appendChild(actions);
+
+    const close = () => this.closeInlinePopover();
+    cancelButton.addEventListener("click", close);
+
+    const submit = async () => {
+      const name = input.value.trim();
+      if (!name) {
+        new Notice("Please enter a note title.");
+        return;
+      }
+      const type = select.value.trim();
+      this.settings.lastSelectedType = type || "";
+      await this.saveSettings();
+      await this.createNoteInLaneFromData(lane, boardConfig, name, type);
+      close();
+    };
+
+    createButton.addEventListener("click", submit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => input.focus(), 0);
+  }
+
+  openInlineLaneRenameMenu(anchorEl, boardFile, laneName) {
+    if (!anchorEl || !boardFile) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 220;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "Rename lane";
+    menu.appendChild(title);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "kanbanify-input";
+    input.value = laneName;
+    menu.appendChild(input);
+
+    const actions = document.createElement("div");
+    actions.className = "kanbanify-inline-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.textContent = "Save";
+    actions.appendChild(cancelButton);
+    actions.appendChild(saveButton);
+    menu.appendChild(actions);
+
+    const close = () => this.closeInlinePopover();
+    cancelButton.addEventListener("click", close);
+
+    const submit = async () => {
+      const value = input.value.trim();
+      if (!value) {
+        new Notice("Lane name cannot be empty.");
+        return;
+      }
+      await this.renameLane(boardFile, laneName, value);
+      close();
+    };
+
+    saveButton.addEventListener("click", submit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  }
+
+  openInlineCardTypeMenu(anchorEl, file, boardConfig) {
+    if (!anchorEl || !file || !boardConfig) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 220;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "Card type";
+    menu.appendChild(title);
+
+    const select = document.createElement("select");
+    select.className = "kanbanify-select";
+    const noneOption = document.createElement("option");
+    noneOption.value = "";
+    noneOption.textContent = "No type";
+    select.appendChild(noneOption);
+    (boardConfig.cardTypes || []).forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type.name;
+      option.textContent = type.name;
+      select.appendChild(option);
+    });
+    const currentType = this.getType(file);
+    if (currentType) {
+      select.value = currentType;
+    }
+    menu.appendChild(select);
+
+    const actions = document.createElement("div");
+    actions.className = "kanbanify-inline-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.textContent = "Save";
+    actions.appendChild(cancelButton);
+    actions.appendChild(saveButton);
+    menu.appendChild(actions);
+
+    const close = () => this.closeInlinePopover();
+    cancelButton.addEventListener("click", close);
+
+    const submit = async () => {
+      await this.setType(file, select.value.trim());
+      this.refreshViews();
+      close();
+    };
+
+    saveButton.addEventListener("click", submit);
+    select.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => select.focus(), 0);
+  }
+
+  closeInlinePopover() {
+    if (!this.inlinePopover) return;
+    this.inlinePopover.cleanup();
+    this.inlinePopover.el.remove();
+    this.inlinePopover = null;
+  }
+
+  async createNoteInLaneFromData(lane, boardConfig, name, type) {
+    if (!boardConfig) return;
+    const folder = boardConfig.notesFolder || this.settings.notesFolder || "Kanban";
+    const sanitized = name.replace(/[\\/:*?"<>|]/g, "").trim();
+    if (!sanitized) {
+      new Notice("Invalid note title.");
+      return;
+    }
+
+    await this.ensureFolder(folder);
+    const path = await this.getUniqueFilepath(`${folder}/${sanitized}.md`);
+    const file = await this.app.vault.create(path, `# ${sanitized}\n`);
+    await this.setStatus(file, lane);
+    if (type) {
+      await this.setType(file, type);
+    }
+    this.refreshViews();
+  }
+
   async openBoardMarkdown(file) {
     const leaf = this.app.workspace.getLeaf(false);
     if (!leaf) return;
@@ -1249,6 +1842,37 @@ module.exports = class KanbanifyPlugin extends Plugin {
   openBoardSettings(boardFile) {
     const modal = new BoardSettingsModal(this.app, this, boardFile);
     modal.open();
+  }
+
+  openLaneSettings(boardFile, laneName) {
+    const modal = new LaneRenameModal(this.app, laneName);
+    modal.resolve = async (value) => {
+      if (!value || value === laneName) return;
+      await this.renameLane(boardFile, laneName, value);
+    };
+    modal.open();
+  }
+
+  openCardTypeSettings(file, boardConfig) {
+    const typeOptions = boardConfig.cardTypes || this.getCardTypes();
+    const currentType = this.getType(file) || "";
+    const modal = new CardTypeSelectModal(this.app, typeOptions, currentType);
+    modal.resolve = async (value) => {
+      if (value === null) return;
+      await this.setType(file, value);
+      this.refreshViews();
+    };
+    modal.open();
+  }
+
+  async deleteNote(file) {
+    if (!(file instanceof TFile)) return;
+    if (this.app.vault.trash) {
+      await this.app.vault.trash(file, true);
+    } else {
+      await this.app.vault.delete(file);
+    }
+    this.refreshViews();
   }
 
   async updateBoardConfig(boardFile, updates) {
@@ -1269,6 +1893,44 @@ module.exports = class KanbanifyPlugin extends Plugin {
       frontmatter[DEFAULT_LANE_FIELD] = defaultLane;
       frontmatter[CARD_TYPES_FIELD] = cardTypes;
     });
+  }
+
+  async renameLane(boardFile, fromLane, toLane) {
+    const boardConfig = this.getBoardConfig(boardFile);
+    if (!boardConfig) return;
+    const trimmed = toLane.trim();
+    if (!trimmed) {
+      new Notice("Lane name cannot be empty.");
+      return;
+    }
+    const lanes = boardConfig.lanes.slice();
+    if (lanes.includes(trimmed)) {
+      new Notice("Lane name already exists.");
+      return;
+    }
+    const index = lanes.indexOf(fromLane);
+    if (index === -1) return;
+    lanes[index] = trimmed;
+    const defaultLane = boardConfig.defaultLane === fromLane
+      ? trimmed
+      : boardConfig.defaultLane;
+
+    await this.updateBoardConfig(boardFile, {
+      lanes,
+      notesFolder: boardConfig.notesFolderInput,
+      defaultLane,
+      cardTypes: boardConfig.cardTypes
+    });
+
+    const files = this.app.vault.getMarkdownFiles().filter((file) => {
+      return this.isFileInFolder(file, boardConfig.notesFolder);
+    });
+    for (const file of files) {
+      if (this.getStatus(file) === fromLane) {
+        await this.setStatus(file, trimmed);
+      }
+    }
+    this.refreshViews();
   }
 
   async createBoard() {

@@ -13,8 +13,7 @@
   flex: 1;
   min-height: 0;
   padding: 16px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
 .kanbanify-board-header {
@@ -38,16 +37,32 @@
   gap: 8px;
 }
 
-.kanbanify-board-action {
-  border: none;
-  background: transparent;
+/* Ghost button styling for all kanbanify action buttons */
+.kanbanify-view .kanbanify-board-action,
+.kanbanify-view .kanbanify-add,
+.kanbanify-view .kanbanify-lane-settings,
+.kanbanify-view .kanbanify-card-settings {
+  border: none !important;
+  background: transparent !important;
   padding: 4px;
   border-radius: 6px;
   cursor: pointer;
+  box-shadow: none !important;
+  color: var(--text-normal);
 }
 
-.kanbanify-board-action:hover {
-  background: var(--background-modifier-hover);
+.kanbanify-view .kanbanify-board-action:hover,
+.kanbanify-view .kanbanify-add:hover,
+.kanbanify-view .kanbanify-lane-settings:hover,
+.kanbanify-view .kanbanify-card-settings:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.kanbanify-view .kanbanify-board-action:active,
+.kanbanify-view .kanbanify-add:active,
+.kanbanify-view .kanbanify-lane-settings:active,
+.kanbanify-view .kanbanify-card-settings:active {
+  background: var(--background-modifier-active-hover) !important;
 }
 
 .kanbanify-board::after {
@@ -62,6 +77,7 @@
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
+  align-items: stretch;
 }
 
 .kanbanify-lane {
@@ -72,6 +88,7 @@
   border-radius: 10px;
   border: 1px solid var(--background-modifier-border);
   min-height: 300px;
+  min-height: 0;
 }
 
 .kanbanify-lane-header {
@@ -81,6 +98,7 @@
   padding: 12px;
   border-bottom: 1px solid var(--background-modifier-border);
   font-weight: 600;
+  gap: 8px;
 }
 
 .kanbanify-lane-title {
@@ -89,15 +107,37 @@
   white-space: nowrap;
 }
 
+.kanbanify-lane-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .kanbanify-add {
   border: none;
   background: transparent;
   padding: 4px;
   border-radius: 6px;
   cursor: pointer;
+  box-shadow: none;
+  color: var(--text-normal);
 }
 
 .kanbanify-add:hover {
+  background: var(--background-modifier-hover);
+}
+
+.kanbanify-lane-settings {
+  border: none;
+  background: transparent;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: none;
+  color: var(--text-normal);
+}
+
+.kanbanify-lane-settings:hover {
   background: var(--background-modifier-hover);
 }
 
@@ -134,6 +174,51 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kanbanify-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kanbanify-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kanbanify-card-settings {
+  border: none;
+  background: transparent;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: none;
+  color: var(--text-normal);
+}
+
+.kanbanify-card-settings:hover {
+  background: var(--background-modifier-hover);
+}
+
+.kanbanify-card-delete {
+  border: none !important;
+  background: transparent !important;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: none !important;
+  color: var(--text-normal);
+}
+
+.kanbanify-card-delete:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.kanbanify-danger {
+  color: var(--text-error);
 }
 
 .kanbanify-card-type {
@@ -189,6 +274,33 @@
   border: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
   color: var(--text-normal);
+}
+
+.kanbanify-inline-create {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: var(--shadow-s);
+  z-index: 1000;
+}
+
+.kanbanify-inline-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.kanbanify-inline-label {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.kanbanify-inline-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .kanbanify-prompt-actions {
