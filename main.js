@@ -795,7 +795,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
       }
       const boardConfig = this.getBoardConfig(boardFile);
       if (!boardConfig) return;
-      if (this.isFileInFolder(file, boardConfig.notesFolder)) {
+      if (this.isFileInFolder(file, boardConfig.notesFolderPath)) {
         view.refresh();
       }
     });
@@ -900,11 +900,12 @@ module.exports = class KanbanifyPlugin extends Plugin {
     const frontmatter = cache?.frontmatter ?? {};
 
     const lanes = this.parseLanes(frontmatter[LANES_FIELD]) || this.getLaneList();
-    const notesFolder = this.normalizeFolder(
+    const notesFolder = this.normalizeRelativeFolder(
       typeof frontmatter[FOLDER_FIELD] === "string"
         ? frontmatter[FOLDER_FIELD]
         : this.settings.notesFolder
     );
+    const notesFolderPath = this.resolveFolderForBoard(boardFile, notesFolder);
     const defaultLane = typeof frontmatter[DEFAULT_LANE_FIELD] === "string"
       ? frontmatter[DEFAULT_LANE_FIELD]
       : this.settings.defaultLane;
@@ -918,6 +919,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
       boardFile,
       lanes: finalLanes,
       notesFolder,
+      notesFolderPath,
       defaultLane: finalDefaultLane,
       cardTypes
     };
@@ -966,6 +968,19 @@ module.exports = class KanbanifyPlugin extends Plugin {
     return folder.replace(/[\\/]+$/, "");
   }
 
+  normalizeRelativeFolder(folder) {
+    const normalized = this.normalizeFolder(folder);
+    if (!normalized) return "";
+    return normalized.replace(/^[/\\]+/, "");
+  }
+
+  resolveFolderForBoard(boardFile, folder) {
+    const normalized = this.normalizeRelativeFolder(folder);
+    if (!normalized) return "";
+    const base = boardFile?.parent?.path || "";
+    return base ? `${base}/${normalized}` : normalized;
+  }
+
   isFileInFolder(file, folder) {
     const normalized = this.normalizeFolder(folder);
     if (!normalized) return false;
@@ -995,7 +1010,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
 
     const files = this.app.vault.getMarkdownFiles();
     files.forEach((file) => {
-      if (!this.isFileInFolder(file, boardConfig.notesFolder)) return;
+      if (!this.isFileInFolder(file, boardConfig.notesFolderPath)) return;
 
       const status = this.getStatus(file);
       const type = this.getType(file);
@@ -1031,8 +1046,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
       return;
     }
 
-    if (!this.isFileInFolder(file, boardConfig.notesFolder)) {
-      await this.moveFileToFolder(file, boardConfig.notesFolder);
+    if (!this.isFileInFolder(file, boardConfig.notesFolderPath)) {
+      await this.moveFileToFolder(file, boardConfig.notesFolderPath);
     }
 
     await this.setStatus(file, lane);
@@ -1172,7 +1187,12 @@ module.exports = class KanbanifyPlugin extends Plugin {
       new Notice("No board configuration available.");
       return;
     }
-    const folder = boardConfig.notesFolder || this.settings.notesFolder || "Kanban";
+    const folder = boardConfig.notesFolderPath
+      || this.resolveFolderForBoard(
+        boardConfig.boardFile,
+        this.settings.notesFolder || "Kanban"
+      )
+      || "Kanban";
     const typeOptions = boardConfig.cardTypes || this.getCardTypes();
     const result = await this.promptForNoteType(typeOptions);
     if (!result || !result.title) return;
@@ -1253,7 +1273,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
 
   async updateBoardConfig(boardFile, updates) {
     const lanes = Array.isArray(updates.lanes) ? updates.lanes : [];
-    const notesFolder = this.normalizeFolder(updates.notesFolder || "");
+    const notesFolder = this.normalizeRelativeFolder(updates.notesFolder || "");
     const defaultLane = updates.defaultLane || (lanes[0] || "");
     const cardTypes = Array.isArray(updates.cardTypes)
       ? updates.cardTypes.map((type) => ({
