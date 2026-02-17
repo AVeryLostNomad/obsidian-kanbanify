@@ -343,7 +343,8 @@ class KanbanView extends ItemView {
         if (note.typeColor) {
           cardHeader.style.borderLeft = `4px solid ${note.typeColor}`;
         }
-        const titleRow = cardHeader.createDiv("kanbanify-card-title-row");
+        const headerRow = cardHeader.createDiv("kanbanify-card-header");
+        const titleRow = headerRow.createDiv("kanbanify-card-title-row");
         titleRow.createDiv({
           cls: "kanbanify-card-title",
           text: note.file.basename
@@ -369,7 +370,7 @@ class KanbanView extends ItemView {
             this.plugin.openInlinePriorityMenu(priorityButton, note.file);
           });
         }
-        const cardActions = cardHeader.createDiv("kanbanify-card-actions");
+        const cardActions = headerRow.createDiv("kanbanify-card-actions");
         const cardSettingsButton = cardActions.createEl("button", {
           cls: "kanbanify-card-settings",
           attr: { "aria-label": "Edit card type", type: "button" }
