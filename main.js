@@ -14,6 +14,7 @@ const {
 const VIEW_TYPE = "kanbanify-view";
 const STATUS_FIELD = "kanbanStatus";
 const TYPE_FIELD = "kanbanType";
+const PRIORITY_FIELD = "kanbanPriority";
 const BOARD_FIELD = "kanbanBoard";
 const LANES_FIELD = "kanbanLanes";
 const FOLDER_FIELD = "kanbanFolder";
@@ -34,6 +35,19 @@ const DEFAULT_SETTINGS = {
   ],
   lastSelectedType: ""
 };
+
+const PRIORITY_OPTIONS = [
+  { id: "trivial", label: "Trivial", icon: "." },
+  { id: "lowest", label: "Lowest", icon: "v" },
+  { id: "lower", label: "Lower", icon: "vv" },
+  { id: "low", label: "Low", icon: "vvv" },
+  { id: "medium", label: "Medium", icon: "=" },
+  { id: "high", label: "High", icon: "^" },
+  { id: "higher", label: "Higher", icon: "^^" },
+  { id: "highest", label: "Highest", icon: "^^^" },
+  { id: "critical", label: "Critical", icon: "!" },
+  { id: "blocker", label: "Blocker", icon: "X" }
+];
 
 const HIDE_DONE_OPTIONS = [
   "Never",
@@ -323,17 +337,38 @@ class KanbanView extends ItemView {
       });
 
       notes.forEach((note) => {
-        const cardEl = contentEl.createDiv("kanbanify-card");
-        cardEl.setAttr("draggable", "true");
-        cardEl.setAttr("data-path", note.file.path);
+        const cardHeader = contentEl.createDiv("kanbanify-card");
+        cardHeader.setAttr("draggable", "true");
+        cardHeader.setAttr("data-path", note.file.path);
         if (note.typeColor) {
-          cardEl.style.borderLeft = `4px solid ${note.typeColor}`;
+          cardHeader.style.borderLeft = `4px solid ${note.typeColor}`;
         }
-        const cardHeader = cardEl.createDiv("kanbanify-card-header");
-        cardHeader.createDiv({
+        const titleRow = cardHeader.createDiv("kanbanify-card-title-row");
+        titleRow.createDiv({
           cls: "kanbanify-card-title",
           text: note.file.basename
         });
+        if (note.priority) {
+          const priorityButton = titleRow.createEl("button", {
+            cls: "kanbanify-priority-button",
+            attr: {
+              "aria-label": `Priority ${note.priority.label}`,
+              type: "button"
+            }
+          });
+          priorityButton.setAttr("data-priority", note.priority.id);
+          priorityButton.setAttr("title", note.priority.label);
+          const icon = priorityButton.createSpan({
+            cls: "kanbanify-priority-icon",
+            text: note.priority.icon
+          });
+          icon.setAttr("data-priority", note.priority.id);
+          priorityButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.plugin.openInlinePriorityMenu(priorityButton, note.file);
+          });
+        }
         const cardActions = cardHeader.createDiv("kanbanify-card-actions");
         const cardSettingsButton = cardActions.createEl("button", {
           cls: "kanbanify-card-settings",
@@ -343,7 +378,7 @@ class KanbanView extends ItemView {
         cardSettingsButton.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          this.plugin.openInlineCardTypeMenu(cardSettingsButton, note.file, boardConfig);
+          this.plugin.openInlineCardSettingsMenu(cardSettingsButton, note.file, boardConfig);
         });
         const cardDeleteButton = cardActions.createEl("button", {
           cls: "kanbanify-card-delete",
@@ -356,11 +391,11 @@ class KanbanView extends ItemView {
           this.plugin.deleteNote(note.file);
         });
         if (note.preview) {
-          const previewEl = cardEl.createDiv("kanbanify-card-preview");
+          const previewEl = cardHeader.createDiv("kanbanify-card-preview");
           previewEl.setText(note.preview);
         }
         if (note.typeLabel || note.movedAtLabel) {
-          const footerEl = cardEl.createDiv("kanbanify-card-footer");
+          const footerEl = cardHeader.createDiv("kanbanify-card-footer");
           if (note.typeLabel) {
             const typeEl = footerEl.createDiv("kanbanify-card-type");
             typeEl.setText(note.typeLabel);
@@ -381,16 +416,16 @@ class KanbanView extends ItemView {
           }
         }
         if (note.isDone) {
-          cardEl.addClass("kanbanify-card-done");
+          cardHeader.addClass("kanbanify-card-done");
         }
-        cardEl.addEventListener("click", () => {
+        cardHeader.addEventListener("click", () => {
           this.plugin.openFile(note.file);
         });
-        cardEl.addEventListener("dragstart", (event) => {
+        cardHeader.addEventListener("dragstart", (event) => {
           event.dataTransfer?.setData("application/kanbanify-path", note.file.path);
           event.dataTransfer?.setData("text/plain", note.file.path);
           event.dataTransfer?.setData("text/uri-list", note.file.path);
-          event.dataTransfer?.setDragImage(cardEl, 10, 10);
+          event.dataTransfer?.setDragImage(cardHeader, 10, 10);
           if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
         });
       });
@@ -1365,6 +1400,12 @@ module.exports = class KanbanifyPlugin extends Plugin {
     return typeof type === "string" ? type : null;
   }
 
+  getPriority(file) {
+    const cache = this.app.metadataCache.getFileCache(file);
+    const priority = cache?.frontmatter?.[PRIORITY_FIELD];
+    return typeof priority === "string" ? priority : "medium";
+  }
+
   async collectNotesByLane(boardConfig) {
     const lanes = boardConfig.lanes;
     const defaultLane = boardConfig.defaultLane || lanes[0];
@@ -1372,6 +1413,9 @@ module.exports = class KanbanifyPlugin extends Plugin {
     lanes.forEach((lane) => notesByLane.set(lane, []));
     const typeMap = new Map(
       boardConfig.cardTypes.map((type) => [type.name.toLowerCase(), type])
+    );
+    const priorityMap = new Map(
+      PRIORITY_OPTIONS.map((option) => [option.id, option])
     );
 
     const files = this.app.vault.getMarkdownFiles();
@@ -1382,6 +1426,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
       const status = this.getStatus(file);
       const movedAt = this.getMovedAt(file);
       const type = this.getType(file);
+      const priority = this.getPriority(file);
+      const priorityOption = priorityMap.get(priority) || priorityMap.get("medium");
       const mappedType = type ? typeMap.get(type.toLowerCase()) : null;
       const typeLabel = mappedType?.name || (type ? type : "");
       const typeColor = mappedType?.color || "";
@@ -1402,7 +1448,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
         preview: previewMap.get(file.path) || "",
         laneLabel: targetLane,
         movedAtLabel,
-        movedAtTitle
+        movedAtTitle,
+        priority: priorityOption
       });
     });
 
@@ -1686,6 +1733,18 @@ module.exports = class KanbanifyPlugin extends Plugin {
         frontmatter[TYPE_FIELD] = type;
       }
     });
+  }  
+  
+  async setPriority(file, priority) {
+    if (!(file instanceof TFile) || file.extension !== "md") {
+      return;
+    }
+    const priorityId = PRIORITY_OPTIONS.some((option) => option.id === priority)
+      ? priority
+      : "medium";
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      frontmatter[PRIORITY_FIELD] = priorityId;
+    });
   }
 
   shouldHideDone(boardConfig, lane, movedAt) {
@@ -1963,14 +2022,14 @@ module.exports = class KanbanifyPlugin extends Plugin {
     }, 0);
   }
 
-  openInlineCardTypeMenu(anchorEl, file, boardConfig) {
-    if (!anchorEl || !file || !boardConfig) return;
+  openInlinePriorityMenu(anchorEl, file) {
+    if (!anchorEl || !file) return;
     this.closeInlinePopover();
 
     const menu = document.createElement("div");
     menu.className = "kanbanify-inline-create";
     const rect = anchorEl.getBoundingClientRect();
-    const width = 220;
+    const width = 200;
     const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
     menu.style.position = "fixed";
     menu.style.top = `${rect.bottom + 6}px`;
@@ -1979,25 +2038,18 @@ module.exports = class KanbanifyPlugin extends Plugin {
 
     const title = document.createElement("div");
     title.className = "kanbanify-inline-title";
-    title.textContent = "Card type";
+    title.textContent = "Priority";
     menu.appendChild(title);
 
     const select = document.createElement("select");
     select.className = "kanbanify-select";
-    const noneOption = document.createElement("option");
-    noneOption.value = "";
-    noneOption.textContent = "No type";
-    select.appendChild(noneOption);
-    (boardConfig.cardTypes || []).forEach((type) => {
-      const option = document.createElement("option");
-      option.value = type.name;
-      option.textContent = type.name;
-      select.appendChild(option);
+    PRIORITY_OPTIONS.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.id;
+      opt.textContent = option.label;
+      select.appendChild(opt);
     });
-    const currentType = this.getType(file);
-    if (currentType) {
-      select.value = currentType;
-    }
+    select.value = this.getPriority(file);
     menu.appendChild(select);
 
     const actions = document.createElement("div");
@@ -2014,7 +2066,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
     cancelButton.addEventListener("click", close);
 
     const submit = async () => {
-      await this.setType(file, select.value.trim());
+      await this.setPriority(file, select.value.trim());
       this.refreshViews();
       close();
     };
@@ -2062,6 +2114,127 @@ module.exports = class KanbanifyPlugin extends Plugin {
     window.setTimeout(() => select.focus(), 0);
   }
 
+  openInlineCardSettingsMenu(anchorEl, file, boardConfig) {
+    if (!anchorEl || !file || !boardConfig) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 240;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "Card settings";
+    menu.appendChild(title);
+
+    const typeLabel = document.createElement("div");
+    typeLabel.className = "kanbanify-inline-label";
+    typeLabel.textContent = "Type";
+    menu.appendChild(typeLabel);
+
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "kanbanify-select";
+    const noneOption = document.createElement("option");
+    noneOption.value = "";
+    noneOption.textContent = "No type";
+    typeSelect.appendChild(noneOption);
+    (boardConfig.cardTypes || []).forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type.name;
+      option.textContent = type.name;
+      typeSelect.appendChild(option);
+    });
+    const currentType = this.getType(file);
+    if (currentType) {
+      typeSelect.value = currentType;
+    }
+    menu.appendChild(typeSelect);
+
+    const priorityLabel = document.createElement("div");
+    priorityLabel.className = "kanbanify-inline-label";
+    priorityLabel.textContent = "Priority";
+    menu.appendChild(priorityLabel);
+
+    const prioritySelect = document.createElement("select");
+    prioritySelect.className = "kanbanify-select";
+    PRIORITY_OPTIONS.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.id;
+      opt.textContent = option.label;
+      prioritySelect.appendChild(opt);
+    });
+    prioritySelect.value = this.getPriority(file);
+    menu.appendChild(prioritySelect);
+
+    const actions = document.createElement("div");
+    actions.className = "kanbanify-inline-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.textContent = "Save";
+    actions.appendChild(cancelButton);
+    actions.appendChild(saveButton);
+    menu.appendChild(actions);
+
+    const close = () => this.closeInlinePopover();
+    cancelButton.addEventListener("click", close);
+
+    const submit = async () => {
+      await this.setType(file, typeSelect.value.trim());
+      await this.setPriority(file, prioritySelect.value.trim());
+      this.refreshViews();
+      close();
+    };
+
+    saveButton.addEventListener("click", submit);
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => typeSelect.focus(), 0);
+  }
+
   closeInlinePopover() {
     if (!this.inlinePopover) return;
     this.inlinePopover.cleanup();
@@ -2085,6 +2258,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
     if (type) {
       await this.setType(file, type);
     }
+    
+    await this.setPriority(file, "medium");
     this.refreshViews();
   }
 

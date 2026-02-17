@@ -5,6 +5,45 @@
   overflow: hidden;
 }
 
+.kanbanify-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kanbanify-priority-button {
+  border: none !important;
+  background: transparent !important;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: none !important;
+  color: var(--text-normal);
+  font-size: 0.8em;
+  line-height: 1;
+}
+
+.kanbanify-priority-button:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.kanbanify-priority-icon {
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+
+.kanbanify-priority-icon[data-priority="trivial"] { color: var(--text-muted); }
+.kanbanify-priority-icon[data-priority="lowest"] { color: #3b82f6; }
+.kanbanify-priority-icon[data-priority="lower"] { color: #3b82f6; }
+.kanbanify-priority-icon[data-priority="low"] { color: #3b82f6; }
+.kanbanify-priority-icon[data-priority="medium"] { color: #f59e0b; }
+.kanbanify-priority-icon[data-priority="high"] { color: #ef4444; }
+.kanbanify-priority-icon[data-priority="higher"] { color: #ef4444; }
+.kanbanify-priority-icon[data-priority="highest"] { color: #ef4444; }
+.kanbanify-priority-icon[data-priority="critical"] { color: #dc2626; }
+.kanbanify-priority-icon[data-priority="blocker"] { color: #991b1b; }
+
 .kanbanify-board {
   display: flex;
   flex-direction: column;
