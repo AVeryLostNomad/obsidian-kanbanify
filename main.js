@@ -167,6 +167,7 @@ class KanbanView extends ItemView {
     this.plugin = plugin;
     this.boardEl = null;
     this.boardPath = null;
+    this.renderVersion = 0;
   }
 
   getViewType() {
@@ -228,6 +229,7 @@ class KanbanView extends ItemView {
     }
 
     const boardFile = this.getBoardFile();
+    const renderToken = ++this.renderVersion;
     if (!boardFile) {
       if (typeof this.setTitle === "function") {
         this.setTitle("Kanbanify Board");
@@ -267,6 +269,8 @@ class KanbanView extends ItemView {
 
     const lanes = boardConfig.lanes;
     const notesByLane = await this.plugin.collectNotesByLane(boardConfig);
+    if (renderToken !== this.renderVersion)
+      return;
     const lanesEl = this.boardEl.createDiv("kanbanify-lanes");
 
     lanes.forEach((lane) => {
