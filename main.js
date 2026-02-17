@@ -14,6 +14,7 @@ const {
 const VIEW_TYPE = "kanbanify-view";
 const STATUS_FIELD = "kanbanStatus";
 const TYPE_FIELD = "kanbanType";
+const PRIORITY_FIELD = "kanbanPriority";
 const BOARD_FIELD = "kanbanBoard";
 const LANES_FIELD = "kanbanLanes";
 const FOLDER_FIELD = "kanbanFolder";
@@ -31,6 +32,28 @@ const DEFAULT_SETTINGS = {
   ],
   lastSelectedType: ""
 };
+
+const PRIORITY_OPTIONS = [
+  { id: "trivial", label: "Trivial", icon: "." },
+  { id: "lowest", label: "Lowest", icon: "vvv" },
+  { id: "lower", label: "Lower", icon: "vv" },
+  { id: "low", label: "Low", icon: "v" },
+  { id: "medium", label: "Medium", icon: "=" },
+  { id: "high", label: "High", icon: "^" },
+  { id: "higher", label: "Higher", icon: "^^" },
+  { id: "highest", label: "Highest", icon: "^^^" },
+  { id: "critical", label: "Critical", icon: "!" },
+  { id: "blocker", label: "Blocker", icon: "X" }
+];
+
+const HIDE_DONE_OPTIONS = [
+  "Never",
+  "Immediately",
+  "10 minutes",
+  "One Day",
+  "One Week",
+  "Two Weeks"
+];
 
 function renderCardTypeEditor(containerEl, plugin) {
   const typesContainer = containerEl.createDiv("kanbanify-types");
@@ -149,6 +172,7 @@ class KanbanView extends ItemView {
     this.plugin = plugin;
     this.boardEl = null;
     this.boardPath = null;
+    this.renderVersion = 0;
   }
 
   getViewType() {
@@ -207,6 +231,7 @@ class KanbanView extends ItemView {
     if (!this.boardEl) return;
 
     const boardFile = this.getBoardFile();
+    const renderToken = ++this.renderVersion;
     if (!boardFile) {
       if (typeof this.setTitle === "function") {
         this.setTitle("Kanbanify Board");
@@ -246,6 +271,8 @@ class KanbanView extends ItemView {
 
     const lanes = boardConfig.lanes;
     const notesByLane = await this.plugin.collectNotesByLane(boardConfig);
+    if (renderToken !== this.renderVersion)
+      return;
     const lanesEl = this.boardEl.createDiv("kanbanify-lanes");
 
     lanes.forEach((lane) => {
@@ -287,32 +314,96 @@ class KanbanView extends ItemView {
 
       const notes = notesByLane.get(lane) || [];
       notes.forEach((note) => {
-        const cardEl = contentEl.createDiv("kanbanify-card");
-        cardEl.setAttr("draggable", "true");
-        cardEl.setAttr("data-path", note.file.path);
+        const cardHeader = contentEl.createDiv("kanbanify-card");
+        cardHeader.setAttr("draggable", "true");
+        cardHeader.setAttr("data-path", note.file.path);
         if (note.typeColor) {
-          cardEl.style.borderLeft = `4px solid ${note.typeColor}`;
+          cardHeader.style.borderLeft = `4px solid ${note.typeColor}`;
         }
-        cardEl.createDiv({
+        const headerRow = cardHeader.createDiv("kanbanify-card-header");
+        const titleRow = headerRow.createDiv("kanbanify-card-title-row");
+        titleRow.createDiv({
           cls: "kanbanify-card-title",
           text: note.file.basename
         });
-        if (note.typeLabel) {
-          const typeEl = cardEl.createDiv("kanbanify-card-type");
-          typeEl.setText(note.typeLabel);
-          if (note.typeColor) {
-            typeEl.style.borderColor = note.typeColor;
-            typeEl.style.color = note.typeColor;
+        if (note.priority) {
+          const priorityButton = titleRow.createEl("button", {
+            cls: "kanbanify-priority-button",
+            attr: {
+              "aria-label": `Priority ${note.priority.label}`,
+              type: "button"
+            }
+          });
+          priorityButton.setAttr("data-priority", note.priority.id);
+          priorityButton.setAttr("title", note.priority.label);
+          const icon = priorityButton.createSpan({
+            cls: "kanbanify-priority-icon",
+            text: note.priority.icon
+          });
+          icon.setAttr("data-priority", note.priority.id);
+          priorityButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.plugin.openInlinePriorityMenu(priorityButton, note.file);
+          });
+        }
+        const cardActions = headerRow.createDiv("kanbanify-card-actions");
+        const cardSettingsButton = cardActions.createEl("button", {
+          cls: "kanbanify-card-settings",
+          attr: { "aria-label": "Edit card type", type: "button" }
+        });
+        setIcon(cardSettingsButton, "settings");
+        cardSettingsButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.plugin.openInlineCardSettingsMenu(cardSettingsButton, note.file, boardConfig);
+        });
+        const cardDeleteButton = cardActions.createEl("button", {
+          cls: "kanbanify-card-delete",
+          attr: { "aria-label": "Delete note", type: "button" }
+        });
+        setIcon(cardDeleteButton, "trash-2");
+        cardDeleteButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.plugin.deleteNote(note.file);
+        });
+        if (note.preview) {
+          const previewEl = cardHeader.createDiv("kanbanify-card-preview");
+          previewEl.setText(note.preview);
+        }
+        if (note.typeLabel || note.movedAtLabel) {
+          const footerEl = cardHeader.createDiv("kanbanify-card-footer");
+          if (note.typeLabel) {
+            const typeEl = footerEl.createDiv("kanbanify-card-type");
+            typeEl.setText(note.typeLabel);
+            if (note.typeColor) {
+              typeEl.style.borderColor = note.typeColor;
+              typeEl.style.color = note.typeColor;
+            }
+          }
+          if (note.movedAtLabel) {
+            const updatedEl = footerEl.createDiv("kanbanify-card-updated");
+            updatedEl.createSpan({
+              cls: "kanbanify-card-updated-date",
+              text: note.movedAtLabel
+            });
+            if (note.movedAtTitle) {
+              updatedEl.setAttr("title", note.movedAtTitle);
+            }
           }
         }
-        cardEl.addEventListener("click", () => {
+        if (note.isDone) {
+          cardHeader.addClass("kanbanify-card-done");
+        }
+        cardHeader.addEventListener("click", () => {
           this.plugin.openFile(note.file);
         });
-        cardEl.addEventListener("dragstart", (event) => {
+        cardHeader.addEventListener("dragstart", (event) => {
           event.dataTransfer?.setData("application/kanbanify-path", note.file.path);
           event.dataTransfer?.setData("text/plain", note.file.path);
           event.dataTransfer?.setData("text/uri-list", note.file.path);
-          event.dataTransfer?.setDragImage(cardEl, 10, 10);
+          event.dataTransfer?.setDragImage(cardHeader, 10, 10);
           if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
         });
       });
@@ -999,6 +1090,12 @@ module.exports = class KanbanifyPlugin extends Plugin {
     return typeof type === "string" ? type : null;
   }
 
+  getPriority(file) {
+    const cache = this.app.metadataCache.getFileCache(file);
+    const priority = cache?.frontmatter?.[PRIORITY_FIELD];
+    return typeof priority === "string" ? priority : "medium";
+  }
+
   async collectNotesByLane(boardConfig) {
     const lanes = boardConfig.lanes;
     const defaultLane = boardConfig.defaultLane || lanes[0];
@@ -1007,6 +1104,9 @@ module.exports = class KanbanifyPlugin extends Plugin {
     const typeMap = new Map(
       boardConfig.cardTypes.map((type) => [type.name.toLowerCase(), type])
     );
+    const priorityMap = new Map(
+      PRIORITY_OPTIONS.map((option) => [option.id, option])
+    );
 
     const files = this.app.vault.getMarkdownFiles();
     files.forEach((file) => {
@@ -1014,6 +1114,8 @@ module.exports = class KanbanifyPlugin extends Plugin {
 
       const status = this.getStatus(file);
       const type = this.getType(file);
+      const priority = this.getPriority(file);
+      const priorityOption = priorityMap.get(priority) || priorityMap.get("medium");
       const mappedType = type ? typeMap.get(type.toLowerCase()) : null;
       const typeLabel = mappedType?.name || (type ? type : "");
       const typeColor = mappedType?.color || "";
@@ -1024,7 +1126,13 @@ module.exports = class KanbanifyPlugin extends Plugin {
       notesByLane.get(targetLane).push({
         file,
         typeLabel,
-        typeColor
+        typeColor,
+        isDone: boardConfig.doneLane && targetLane === boardConfig.doneLane,
+        preview: previewMap.get(file.path) || "",
+        laneLabel: targetLane,
+        movedAtLabel,
+        movedAtTitle,
+        priority: priorityOption
       });
     });
 
@@ -1180,6 +1288,37 @@ module.exports = class KanbanifyPlugin extends Plugin {
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       frontmatter[TYPE_FIELD] = type;
     });
+  }  
+  
+  async setPriority(file, priority) {
+    if (!(file instanceof TFile) || file.extension !== "md") {
+      return;
+    }
+    const priorityId = PRIORITY_OPTIONS.some((option) => option.id === priority)
+      ? priority
+      : "medium";
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      frontmatter[PRIORITY_FIELD] = priorityId;
+    });
+  }
+
+  shouldHideDone(boardConfig, lane, movedAt) {
+    if (!boardConfig.doneLane) return false;
+    if (lane !== boardConfig.doneLane) return false;
+    const rule = boardConfig.hideDoneAfter || "Never";
+    if (rule === "Never") return false;
+    if (rule === "Immediately") return true;
+    if (!movedAt) return false;
+    const ageMs = Date.now() - movedAt;
+    const thresholds = {
+      "10 minutes": 10 * 60 * 1000,
+      "One Day": 24 * 60 * 60 * 1000,
+      "One Week": 7 * 24 * 60 * 60 * 1000,
+      "Two Weeks": 14 * 24 * 60 * 60 * 1000
+    };
+    const threshold = thresholds[rule];
+    if (!threshold) return false;
+    return ageMs > threshold;
   }
 
   async createNoteInLane(lane, boardConfig) {
@@ -1253,6 +1392,449 @@ module.exports = class KanbanifyPlugin extends Plugin {
   async openFile(file) {
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.openFile(file);
+  }
+
+  openInlineCreateMenu(anchorEl, lane, boardConfig) {
+    if (!anchorEl || !boardConfig) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 240;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "New note";
+    menu.appendChild(title);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Note title";
+    input.className = "kanbanify-input";
+    menu.appendChild(input);
+
+    const typeLabel = document.createElement("div");
+    typeLabel.className = "kanbanify-inline-label";
+    typeLabel.textContent = "Note type";
+    menu.appendChild(typeLabel);
+
+    const select = document.createElement("select");
+    select.className = "kanbanify-select";
+    const noneOption = document.createElement("option");
+    noneOption.value = "";
+    noneOption.textContent = "No type";
+    select.appendChild(noneOption);
+    (boardConfig.cardTypes || []).forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type.name;
+      option.textContent = type.name;
+      select.appendChild(option);
+    });
+    if (this.settings.lastSelectedType) {
+      select.value = this.settings.lastSelectedType;
+    }
+    menu.appendChild(select);
+
+    const actions = document.createElement("div");
+    actions.className = "kanbanify-inline-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.textContent = "Cancel";
+    const createButton = document.createElement("button");
+    createButton.textContent = "Create";
+    actions.appendChild(cancelButton);
+    actions.appendChild(createButton);
+    menu.appendChild(actions);
+
+    const close = () => this.closeInlinePopover();
+    cancelButton.addEventListener("click", close);
+
+    const submit = async () => {
+      const name = input.value.trim();
+      if (!name) {
+        new Notice("Please enter a note title.");
+        return;
+      }
+      const type = select.value.trim();
+      this.settings.lastSelectedType = type || "";
+      await this.saveSettings();
+      await this.createNoteInLaneFromData(lane, boardConfig, name, type);
+      close();
+    };
+
+    createButton.addEventListener("click", submit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => input.focus(), 0);
+  }
+
+  openInlineLaneRenameMenu(anchorEl, boardFile, laneName) {
+    if (!anchorEl || !boardFile) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 220;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "Rename lane";
+    menu.appendChild(title);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "kanbanify-input";
+    input.value = laneName;
+    menu.appendChild(input);
+
+    const actions = document.createElement("div");
+    actions.className = "kanbanify-inline-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.textContent = "Save";
+    actions.appendChild(cancelButton);
+    actions.appendChild(saveButton);
+    menu.appendChild(actions);
+
+    const close = () => this.closeInlinePopover();
+    cancelButton.addEventListener("click", close);
+
+    const submit = async () => {
+      const value = input.value.trim();
+      if (!value) {
+        new Notice("Lane name cannot be empty.");
+        return;
+      }
+      await this.renameLane(boardFile, laneName, value);
+      close();
+    };
+
+    saveButton.addEventListener("click", submit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  }
+
+  openInlinePriorityMenu(anchorEl, file) {
+    if (!anchorEl || !file) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 200;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "Priority";
+    menu.appendChild(title);
+
+    const selectedPriority = this.getPriority(file);
+    const list = document.createElement("div");
+    list.className = "kanbanify-priority-options";
+    PRIORITY_OPTIONS.forEach((option) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "kanbanify-priority-option";
+      if (option.id === selectedPriority) {
+        item.classList.add("is-selected");
+      }
+      const icon = document.createElement("span");
+      icon.className = "kanbanify-priority-option-icon";
+      icon.textContent = option.icon;
+      icon.setAttr("data-priority", option.id);
+      const label = document.createElement("span");
+      label.className = "kanbanify-priority-option-label";
+      label.textContent = option.label;
+      item.appendChild(icon);
+      item.appendChild(label);
+      item.addEventListener("click", async (event) => {
+        event.preventDefault();
+        await this.setPriority(file, option.id);
+        this.refreshViews();
+        close();
+      });
+      list.appendChild(item);
+    });
+    menu.appendChild(list);
+
+    const close = () => this.closeInlinePopover();
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => {
+      const firstOption = menu.querySelector(".kanbanify-priority-option");
+      if (firstOption) firstOption.focus();
+    }, 0);
+  }
+
+  openInlineCardSettingsMenu(anchorEl, file, boardConfig) {
+    if (!anchorEl || !file || !boardConfig) return;
+    this.closeInlinePopover();
+
+    const menu = document.createElement("div");
+    menu.className = "kanbanify-inline-create";
+    const rect = anchorEl.getBoundingClientRect();
+    const width = 240;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+
+    const title = document.createElement("div");
+    title.className = "kanbanify-inline-title";
+    title.textContent = "Card settings";
+    menu.appendChild(title);
+
+    const typeLabel = document.createElement("div");
+    typeLabel.className = "kanbanify-inline-label";
+    typeLabel.textContent = "Type";
+    menu.appendChild(typeLabel);
+
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "kanbanify-select";
+    const noneOption = document.createElement("option");
+    noneOption.value = "";
+    noneOption.textContent = "No type";
+    typeSelect.appendChild(noneOption);
+    (boardConfig.cardTypes || []).forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type.name;
+      option.textContent = type.name;
+      typeSelect.appendChild(option);
+    });
+    const currentType = this.getType(file);
+    if (currentType) {
+      typeSelect.value = currentType;
+    }
+    menu.appendChild(typeSelect);
+
+    const priorityLabel = document.createElement("div");
+    priorityLabel.className = "kanbanify-inline-label";
+    priorityLabel.textContent = "Priority";
+    menu.appendChild(priorityLabel);
+
+    const prioritySelect = document.createElement("select");
+    prioritySelect.className = "kanbanify-select";
+    PRIORITY_OPTIONS.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.id;
+      opt.textContent = option.label;
+      prioritySelect.appendChild(opt);
+    });
+    prioritySelect.value = this.getPriority(file);
+    menu.appendChild(prioritySelect);
+
+    const actions = document.createElement("div");
+    actions.className = "kanbanify-inline-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.textContent = "Save";
+    actions.appendChild(cancelButton);
+    actions.appendChild(saveButton);
+    menu.appendChild(actions);
+
+    const close = () => this.closeInlinePopover();
+    cancelButton.addEventListener("click", close);
+
+    const submit = async () => {
+      await this.setType(file, typeSelect.value.trim());
+      await this.setPriority(file, prioritySelect.value.trim());
+      this.refreshViews();
+      close();
+    };
+
+    saveButton.addEventListener("click", submit);
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    const onDocumentClick = (event) => {
+      if (!menu.contains(event.target)) {
+        close();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    this.inlinePopover = {
+      el: menu,
+      cleanup: () => {
+        document.removeEventListener("mousedown", onDocumentClick);
+        document.removeEventListener("keydown", onKeyDown);
+      }
+    };
+
+    document.body.appendChild(menu);
+    window.setTimeout(() => typeSelect.focus(), 0);
+  }
+
+  closeInlinePopover() {
+    if (!this.inlinePopover) return;
+    this.inlinePopover.cleanup();
+    this.inlinePopover.el.remove();
+    this.inlinePopover = null;
+  }
+
+  async createNoteInLaneFromData(lane, boardConfig, name, type) {
+    if (!boardConfig) return;
+    const folder = boardConfig.notesFolder || this.settings.notesFolder || "Kanban";
+    const sanitized = name.replace(/[\\/:*?"<>|]/g, "").trim();
+    if (!sanitized) {
+      new Notice("Invalid note title.");
+      return;
+    }
+
+    await this.ensureFolder(folder);
+    const path = await this.getUniqueFilepath(`${folder}/${sanitized}.md`);
+    const file = await this.app.vault.create(path, `# ${sanitized}\n`);
+    await this.setStatus(file, lane);
+    if (type) {
+      await this.setType(file, type);
+    }
+    
+    await this.setPriority(file, "medium");
+    this.refreshViews();
   }
 
   async openBoardMarkdown(file) {
