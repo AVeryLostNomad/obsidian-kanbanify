@@ -38,9 +38,9 @@ const DEFAULT_SETTINGS = {
 
 const PRIORITY_OPTIONS = [
   { id: "trivial", label: "Trivial", icon: "." },
-  { id: "lowest", label: "Lowest", icon: "v" },
+  { id: "lowest", label: "Lowest", icon: "vvv" },
   { id: "lower", label: "Lower", icon: "vv" },
-  { id: "low", label: "Low", icon: "vvv" },
+  { id: "low", label: "Low", icon: "v" },
   { id: "medium", label: "Medium", icon: "=" },
   { id: "high", label: "High", icon: "^" },
   { id: "higher", label: "Higher", icon: "^^" },
@@ -2041,47 +2041,36 @@ module.exports = class KanbanifyPlugin extends Plugin {
     title.textContent = "Priority";
     menu.appendChild(title);
 
-    const select = document.createElement("select");
-    select.className = "kanbanify-select";
+    const selectedPriority = this.getPriority(file);
+    const list = document.createElement("div");
+    list.className = "kanbanify-priority-options";
     PRIORITY_OPTIONS.forEach((option) => {
-      const opt = document.createElement("option");
-      opt.value = option.id;
-      opt.textContent = option.label;
-      select.appendChild(opt);
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "kanbanify-priority-option";
+      if (option.id === selectedPriority) {
+        item.classList.add("is-selected");
+      }
+      const icon = document.createElement("span");
+      icon.className = "kanbanify-priority-option-icon";
+      icon.textContent = option.icon;
+      icon.setAttr("data-priority", option.id);
+      const label = document.createElement("span");
+      label.className = "kanbanify-priority-option-label";
+      label.textContent = option.label;
+      item.appendChild(icon);
+      item.appendChild(label);
+      item.addEventListener("click", async (event) => {
+        event.preventDefault();
+        await this.setPriority(file, option.id);
+        this.refreshViews();
+        close();
+      });
+      list.appendChild(item);
     });
-    select.value = this.getPriority(file);
-    menu.appendChild(select);
-
-    const actions = document.createElement("div");
-    actions.className = "kanbanify-inline-actions";
-    const cancelButton = document.createElement("button");
-    cancelButton.textContent = "Cancel";
-    const saveButton = document.createElement("button");
-    saveButton.textContent = "Save";
-    actions.appendChild(cancelButton);
-    actions.appendChild(saveButton);
-    menu.appendChild(actions);
+    menu.appendChild(list);
 
     const close = () => this.closeInlinePopover();
-    cancelButton.addEventListener("click", close);
-
-    const submit = async () => {
-      await this.setPriority(file, select.value.trim());
-      this.refreshViews();
-      close();
-    };
-
-    saveButton.addEventListener("click", submit);
-    select.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        submit();
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close();
-      }
-    });
 
     menu.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -2111,7 +2100,10 @@ module.exports = class KanbanifyPlugin extends Plugin {
     };
 
     document.body.appendChild(menu);
-    window.setTimeout(() => select.focus(), 0);
+    window.setTimeout(() => {
+      const firstOption = menu.querySelector(".kanbanify-priority-option");
+      if (firstOption) firstOption.focus();
+    }, 0);
   }
 
   openInlineCardSettingsMenu(anchorEl, file, boardConfig) {

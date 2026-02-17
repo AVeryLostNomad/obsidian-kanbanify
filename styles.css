@@ -31,6 +31,11 @@
 .kanbanify-priority-icon {
   font-weight: 700;
   letter-spacing: -1px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .kanbanify-priority-icon[data-priority="trivial"] { color: var(--text-muted); }
@@ -43,6 +48,17 @@
 .kanbanify-priority-icon[data-priority="highest"] { color: #ef4444; }
 .kanbanify-priority-icon[data-priority="critical"] { color: #dc2626; }
 .kanbanify-priority-icon[data-priority="blocker"] { color: #991b1b; }
+
+.kanbanify-priority-option-icon[data-priority="trivial"] { color: var(--text-muted); }
+.kanbanify-priority-option-icon[data-priority="lowest"] { color: #3b82f6; }
+.kanbanify-priority-option-icon[data-priority="lower"] { color: #3b82f6; }
+.kanbanify-priority-option-icon[data-priority="low"] { color: #3b82f6; }
+.kanbanify-priority-option-icon[data-priority="medium"] { color: #f59e0b; }
+.kanbanify-priority-option-icon[data-priority="high"] { color: #ef4444; }
+.kanbanify-priority-option-icon[data-priority="higher"] { color: #ef4444; }
+.kanbanify-priority-option-icon[data-priority="highest"] { color: #ef4444; }
+.kanbanify-priority-option-icon[data-priority="critical"] { color: #dc2626; }
+.kanbanify-priority-option-icon[data-priority="blocker"] { color: #991b1b; }
 
 .kanbanify-board {
   display: flex;
@@ -370,6 +386,43 @@
   font-size: 0.85em;
   color: var(--text-muted);
   margin-top: 6px;
+}
+
+.kanbanify-priority-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.kanbanify-priority-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kanbanify-priority-option:hover {
+  background: var(--background-secondary);
+}
+
+.kanbanify-priority-option.is-selected {
+  border-color: var(--interactive-accent);
+  background: var(--background-secondary-alt);
+}
+
+.kanbanify-priority-option-icon {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  min-width: 18px;
+  text-align: center;
 }
 
 .kanbanify-inline-actions {
