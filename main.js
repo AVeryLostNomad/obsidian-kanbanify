@@ -1809,7 +1809,7 @@ module.exports = class KanbanifyPlugin extends Plugin {
   }
 
   async openFile(file) {
-    const leaf = this.app.workspace.getLeaf(false);
+    const leaf = this.app.workspace.getLeaf("split");
     await leaf.openFile(file);
   }
 
